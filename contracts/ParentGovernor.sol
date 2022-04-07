@@ -5,6 +5,9 @@ pragma solidity >=0.8.0 <0.9.0;
 import "interfaces/ILayerZeroEndpoint.sol";
 import "interfaces/ILayerZeroReceiver.sol";
 
+// The contract for the parent governor where the proposal is created and propragated to the child chains.
+// After the voting period has ended the proposal results from the child chains are aggregated and the proposal
+// is either accepted or rejected.
 contract ParentGovernor is ILayerZeroReceiver {
     /**
      * @notice Holds information about a proposal
@@ -26,22 +29,22 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param receipts - Receipts of ballots for the entire set of voters
      */
     struct Proposal {
-        uint id;
+        uint256 id;
         address proposer;
-        uint eta;
+        uint256 eta;
         address[] targets;
-        uint[] values;
+        uint256[] values;
         string[] signatures;
         bytes[] calldatas;
-        uint startBlock;
-        uint endBlock;
-        uint forVotes;
-        uint againstVotes;
-        uint quorumVotes;
-        uint childAggregated;
+        uint256 startBlock;
+        uint256 endBlock;
+        uint256 forVotes;
+        uint256 againstVotes;
+        uint256 quorumVotes;
+        uint256 childAggregated;
         bool canceled;
         bool executed;
-        mapping (address => Receipt) receipts;
+        mapping(address => Receipt) receipts;
     }
 
     /**
@@ -71,27 +74,29 @@ contract ParentGovernor is ILayerZeroReceiver {
     }
 
     /// @notice The name of this contract
-    string public constant name = "AnyDAO Governor Alpha";
+    string public constant name = "anyDAO Governor Alpha";
 
     /// @notice The maximum number of actions that can be included in a proposal
-    uint public constant proposalMaxOperations = 10; // 10 actions
+    uint256 public constant proposalMaxOperations = 10; // 10 actions
 
-    uint public quorum = 25; // 4% of total voting power
-    uint public proposerPower = 100; // 1% of total voting power
+    uint256 public quorum = 25; // 4% of total voting power
+    uint256 public proposerPower = 100; // 1% of total voting power
     /// @notice The duration of voting on a proposal, in blocks
-    uint public votingPeriod = 40_320; // ~7 days in blocks (assuming 15s blocks)
+    uint256 public votingPeriod = 40_320; // ~7 days in blocks (assuming 15s blocks)
     /// @notice The delay, in blocks, before voting on a proposal may take place, once proposed
-    uint public votingDelay = 1;
+    uint256 public votingDelay = 1;
     /// @notice The total number of proposals
-    uint public proposalCount;
+    uint256 public proposalCount;
 
     /// @notice The EIP-712 typehash for the contract's domain
-    bytes32 public constant DOMAIN_TYPEHASH = keccak256(
-        "EIP712Domain(string name,uint256 chainId,address verifyingContract)"
-    );
+    bytes32 public constant DOMAIN_TYPEHASH =
+        keccak256(
+            "EIP712Domain(string name,uint256 chainId,address verifyingContract)"
+        );
 
     /// @notice The EIP-712 typehash for the ballot struct used by the contract
-    bytes32 public constant BALLOT_TYPEHASH = keccak256("Ballot(uint256 proposalId,bool support)");
+    bytes32 public constant BALLOT_TYPEHASH =
+        keccak256("Ballot(uint256 proposalId,bool support)");
 
     /// @notice The LayerZero endpoint
     ILayerZeroEndpoint public endpoint;
@@ -106,50 +111,55 @@ contract ParentGovernor is ILayerZeroReceiver {
     uint16[] public childChains;
 
     /// @notice Token addresses of the ChildGovernor to each chain IDs
-    mapping (uint16 => address) public childGovernors;
+    mapping(uint16 => address) public childGovernors;
 
     /// @notice The official record of all proposals ever proposed
-    mapping (uint => Proposal) public proposals;
+    mapping(uint256 => Proposal) public proposals;
 
     /// @notice The latest proposal for each proposer
-    mapping (address => uint) public latestProposalIds;
+    mapping(address => uint256) public latestProposalIds;
 
     /// @notice An event emitted when a new proposal is created
     event ProposalCreated(
-        uint id,
+        uint256 id,
         address proposer,
         address[] targets,
-        uint[] values,
+        uint256[] values,
         string[] signatures,
         bytes[] calldatas,
-        uint startBlock,
-        uint endBlock,
+        uint256 startBlock,
+        uint256 endBlock,
         string description
     );
 
     /// @notice An event emitted when a vote has been cast on a proposal
-    event VoteCast(address voter, uint proposalId, bool support, uint votes);
+    event VoteCast(
+        address voter,
+        uint256 proposalId,
+        bool support,
+        uint256 votes
+    );
 
     /// @notice An event emitted when a proposal has been canceled
-    event ProposalCanceled(uint id);
+    event ProposalCanceled(uint256 id);
 
     /// @notice An event emitted when a proposal has been queued in the Timelock
-    event ProposalQueued(uint id, uint eta);
+    event ProposalQueued(uint256 id, uint256 eta);
 
     /// @notice An event emitted when a proposal has been executed in the Timelock
-    event ProposalExecuted(uint id);
+    event ProposalExecuted(uint256 id);
 
     /// @notice An event emitted when the required amount of votes for a proposal to be accepted changes
-    event NewQuorum(uint divisor);
+    event NewQuorum(uint256 divisor);
 
     /// @notice An event emitted when the required amount of voting power required to make a proposal changes
-    event NewProposer(uint divisor);
+    event NewProposer(uint256 divisor);
 
     /// @notice An event emitted when the time a proposal stays in voting time in blocks changes
-    event NewVotingPeriod(uint period);
+    event NewVotingPeriod(uint256 period);
 
     /// @notice An event emitted when the delay before voting on a proposal may take place changes
-    event NewVotingDelay(uint period);
+    event NewVotingDelay(uint256 period);
 
     /**
      * @notice The admin of this contract is the timelock that is owned by this contract, thus
@@ -165,8 +175,15 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param endpoint_ - LayerZero endpoint address on parent chain
      * @param token_ - Contract with voting power logic
      */
-    constructor(address timelock_, address endpoint_, address token_) {
-        require(timelock_ != address(0) || token_ != address(0), "ERR_ZERO_ADDRESS");
+    constructor(
+        address timelock_,
+        address endpoint_,
+        address token_
+    ) {
+        require(
+            timelock_ != address(0) || token_ != address(0),
+            "ERR_ZERO_ADDRESS"
+        );
         timelock = TimelockInterface(timelock_);
         endpoint = ILayerZeroEndpoint(endpoint_);
         token = IGovToken(token_);
@@ -179,7 +196,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param divisor - divisor of total amount of votes
      */
-    function setQuorum(uint divisor) external onlyOwner {
+    function setQuorum(uint256 divisor) external onlyOwner {
         require(divisor > 0, "ERR_INVALID_QUORUM");
         quorum = divisor;
         emit NewQuorum(quorum);
@@ -192,7 +209,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param divisor - divisor of total amount of votes
      */
-    function setProposer(uint divisor) external onlyOwner {
+    function setProposer(uint256 divisor) external onlyOwner {
         require(divisor > 0, "ERR_INVALID_PROPOSER");
         proposerPower = divisor;
         emit NewProposer(proposerPower);
@@ -203,7 +220,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param period - Time voting stays open in blocks
      */
-    function setVotingPeriod(uint period) external onlyOwner {
+    function setVotingPeriod(uint256 period) external onlyOwner {
         require(period > 11_520, "ERR_MIN_TWO_DAYS");
         votingPeriod = period;
         emit NewVotingPeriod(votingPeriod);
@@ -214,7 +231,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param period - Time proposal will stay stale before voting starts in blocks
      */
-    function setVotingDelay(uint period) external onlyOwner {
+    function setVotingDelay(uint256 period) external onlyOwner {
         require(period > 0, "ERR_MIN_ONE_BLOCK");
         votingDelay = period;
         emit NewVotingDelay(votingDelay);
@@ -259,40 +276,51 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param values - Send amount of wei for payable functions defined in `signatures`
      * @param signatures - Functions that will be called from the contract in `targets`
      * @param calldatas - Parameters of the functions in `signatures`
-     * @param description - Proposal description, this is what is shown in the governance screen 
+     * @param description - Proposal description, this is what is shown in the governance screen
      *
      * @return Proposal ID
      */
     function propose(
         address[] memory targets,
-        uint[] memory values,
+        uint256[] memory values,
         string[] memory signatures,
         bytes[] memory calldatas,
         string memory description
-        ) public returns (uint)
-    {
+    ) public returns (uint256) {
         require(
-            token.getPriorVotes(msg.sender, block.number - 1) > proposalThreshold(),
+            token.getPriorVotes(msg.sender, block.number - 1) >
+                proposalThreshold(),
             "ERR_NOT_ENOUGH_VOTING_POWER"
         );
         require(
             targets.length == values.length &&
-            targets.length == signatures.length &&
-            targets.length == calldatas.length,
+                targets.length == signatures.length &&
+                targets.length == calldatas.length,
             "ERR_ARITY_MISMATCH"
         );
         require(targets.length != 0, "ERR_NO_ACTIONS");
-        require(targets.length <= proposalMaxOperations, "ERR_TOO_MANY_ACTIONS");
+        require(
+            targets.length <= proposalMaxOperations,
+            "ERR_TOO_MANY_ACTIONS"
+        );
 
-        uint latestProposalId = latestProposalIds[msg.sender];
+        uint256 latestProposalId = latestProposalIds[msg.sender];
         if (latestProposalId != 0) {
-            ProposalState proposersLatestProposalState = state(latestProposalId);
-            require(proposersLatestProposalState != ProposalState.Active, "ERR_HAS_ACTIVE_PROPOSAL");
-            require(proposersLatestProposalState != ProposalState.Pending, "ERR_HAS_PENDING_PROPOSAL");
+            ProposalState proposersLatestProposalState = state(
+                latestProposalId
+            );
+            require(
+                proposersLatestProposalState != ProposalState.Active,
+                "ERR_HAS_ACTIVE_PROPOSAL"
+            );
+            require(
+                proposersLatestProposalState != ProposalState.Pending,
+                "ERR_HAS_PENDING_PROPOSAL"
+            );
         }
 
-        uint startBlock = block.number + votingDelay;
-        uint endBlock = startBlock + votingPeriod;
+        uint256 startBlock = block.number + votingDelay;
+        uint256 endBlock = startBlock + votingPeriod;
 
         proposalCount++;
         Proposal storage newProposal = proposals[proposalCount];
@@ -315,7 +343,7 @@ contract ParentGovernor is ILayerZeroReceiver {
         latestProposalIds[newProposal.proposer] = newProposal.id;
 
         // create child proposals
-        for (uint i=0; i <= childChains.length; i++) {
+        for (uint256 i = 0; i <= childChains.length; i++) {
             uint16 chainId = childChains[i];
             _createChildPoll(newProposal.id, chainId);
         }
@@ -339,19 +367,24 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param proposalId - ID of the proposal to be queued
      */
-    function queue(uint proposalId) public {
-        require(state(proposalId) == ProposalState.Succeeded, "ERR_NOT_SUCCEEDED");
+    function queue(uint256 proposalId) public {
+        require(
+            state(proposalId) == ProposalState.Succeeded,
+            "ERR_NOT_SUCCEEDED"
+        );
         Proposal storage proposal = proposals[proposalId];
-        uint eta = block.timestamp + timelock.delay();
-        for (uint i = 0; i < proposal.targets.length; i++) {
-            bytes32 expectedHash = keccak256(abi.encode(
-                proposalId,
-                proposal.targets[i],
-                proposal.values[i],
-                proposal.signatures[i],
-                proposal.calldatas[i],
-                eta
-            ));
+        uint256 eta = block.timestamp + timelock.delay();
+        for (uint256 i = 0; i < proposal.targets.length; i++) {
+            bytes32 expectedHash = keccak256(
+                abi.encode(
+                    proposalId,
+                    proposal.targets[i],
+                    proposal.values[i],
+                    proposal.signatures[i],
+                    proposal.calldatas[i],
+                    eta
+                )
+            );
             require(
                 !timelock.queuedTransactions(expectedHash),
                 "ERR_ACTION_ALREADY_QUEUED_AT_ETA"
@@ -373,12 +406,14 @@ contract ParentGovernor is ILayerZeroReceiver {
     /**
      * @notice Executes a succeded proposal that has already been queued
      */
-    function execute(uint proposalId) public payable {
+    function execute(uint256 proposalId) public payable {
         require(state(proposalId) == ProposalState.Queued, "ERR_NOT_QUEUED");
         Proposal storage proposal = proposals[proposalId];
         proposal.executed = true;
-        for (uint i = 0; i < proposal.targets.length; i++) {
-            bytes memory returnData = timelock.executeTransaction{value: proposal.values[i]}(
+        for (uint256 i = 0; i < proposal.targets.length; i++) {
+            bytes memory returnData = timelock.executeTransaction{
+                value: proposal.values[i]
+            }(
                 proposalId,
                 proposal.targets[i],
                 proposal.values[i],
@@ -397,7 +432,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @param proposalId - Proposal to be cancelled
      */
-    function cancel(uint proposalId) public {
+    function cancel(uint256 proposalId) public {
         ProposalState curState = state(proposalId);
         require(curState != ProposalState.Executed, "ERR_ALREADY_EXECUTED");
         require(curState != ProposalState.Canceled, "ERR_ALREADY_CANCELED");
@@ -406,12 +441,13 @@ contract ParentGovernor is ILayerZeroReceiver {
 
         require(proposal.proposer == msg.sender, "ERR_NOT_PROPOSER");
         require(
-            token.getPriorVotes(proposal.proposer, block.number - 1) > proposalThreshold(),
+            token.getPriorVotes(proposal.proposer, block.number - 1) >
+                proposalThreshold(),
             "ERR_NOT_ABOVE_THRESHOLD"
         );
 
         proposal.canceled = true;
-        for (uint i = 0; i < proposal.targets.length; i++) {
+        for (uint256 i = 0; i < proposal.targets.length; i++) {
             timelock.cancelTransaction(
                 proposalId,
                 proposal.targets[i],
@@ -431,7 +467,7 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param proposalId - ID of proposal to cast a vote to
      * @param support - True for accepting, False for rejecting
      */
-    function castVote(uint proposalId, bool support) public {
+    function castVote(uint256 proposalId, bool support) public {
         return _castVote(msg.sender, proposalId, support);
     }
 
@@ -444,7 +480,13 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param r - Half of the ECDSA signature pair
      * @param s - Half of the ECDSA signature pair
      */
-    function castVoteBySig(uint proposalId, bool support, uint8 v, bytes32 r, bytes32 s) public {
+    function castVoteBySig(
+        uint256 proposalId,
+        bool support,
+        uint8 v,
+        bytes32 r,
+        bytes32 s
+    ) public {
         bytes32 domainSeparator = keccak256(
             abi.encode(
                 DOMAIN_TYPEHASH,
@@ -453,8 +495,12 @@ contract ParentGovernor is ILayerZeroReceiver {
                 address(this)
             )
         );
-        bytes32 structHash = keccak256(abi.encode(BALLOT_TYPEHASH, proposalId, support));
-        bytes32 digest = keccak256(abi.encodePacked("\x19\x01", domainSeparator, structHash));
+        bytes32 structHash = keccak256(
+            abi.encode(BALLOT_TYPEHASH, proposalId, support)
+        );
+        bytes32 digest = keccak256(
+            abi.encodePacked("\x19\x01", domainSeparator, structHash)
+        );
         address signatory = ecrecover(digest, v, r, s);
         require(signatory != address(0), "ERR_INVALID_SIGNATURE");
         return _castVote(signatory, proposalId, support);
@@ -464,27 +510,35 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @notice Close all child polls to aggregate votes
      *
      * @param proposalId - ID of proposal to cast a vote to
-     */  
-    function aggregateChildPolls(uint proposalId) public {
+     */
+    function aggregateChildPolls(uint256 proposalId) public {
         ProposalState curState = state(proposalId);
         require(curState == ProposalState.Aggregating, "ERR_NOT_AGGREGATING");
 
-        for (uint i=0; i <= childChains.length; i++) {
+        for (uint256 i = 0; i <= childChains.length; i++) {
             uint16 chainId = childChains[i];
             _closeChildPoll(proposalId, chainId);
         }
     }
 
     /// @notice Receives messages from LayerZero
-    function lzReceive(uint16 _srcChainId, bytes memory _srcAddress, uint64, bytes memory _payload) override external {
+    function lzReceive(
+        uint16 _srcChainId,
+        bytes memory _srcAddress,
+        uint64,
+        bytes memory _payload
+    ) external override {
         require(msg.sender == address(endpoint));
 
         // use assembly to extract the address from the bytes memory parameter
         address fromAddress;
-        assembly { fromAddress := mload(add(_srcAddress, 20)) }
+        assembly {
+            fromAddress := mload(add(_srcAddress, 20))
+        }
         require(fromAddress == childGovernors[_srcChainId]);
 
-        (uint proposalId, uint forVotes, uint againstVotes) = abi.decode(_payload, (uint, uint, uint));
+        (uint256 proposalId, uint256 forVotes, uint256 againstVotes) = abi
+            .decode(_payload, (uint256, uint256, uint256));
 
         // TO DO: create childGovernor receipts to store votes
         Proposal storage proposal = proposals[proposalId];
@@ -503,10 +557,12 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @return signatures - Functions that will be called from the contract in `targets`
      * @return calldatas - Parameters of the functions in `signatures`
      */
-    function getActions(uint proposalId)
-        public view returns (
+    function getActions(uint256 proposalId)
+        public
+        view
+        returns (
             address[] memory targets,
-            uint[] memory values,
+            uint256[] memory values,
             string[] memory signatures,
             bytes[] memory calldatas
         )
@@ -523,7 +579,11 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @return A Receipt struct with the information about the vote cast
      */
-    function getReceipt(uint proposalId, address voter) public view returns (Receipt memory) {
+    function getReceipt(uint256 proposalId, address voter)
+        public
+        view
+        returns (Receipt memory)
+    {
         return proposals[proposalId].receipts[voter];
     }
 
@@ -534,8 +594,11 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @return ProposalState enum (uint) with state of the proposal
      */
-    function state(uint proposalId) public view returns (ProposalState) {
-        require(proposalCount >= proposalId && proposalId > 0, "ERR_INVALID_PROPOSAL_ID");
+    function state(uint256 proposalId) public view returns (ProposalState) {
+        require(
+            proposalCount >= proposalId && proposalId > 0,
+            "ERR_INVALID_PROPOSAL_ID"
+        );
         Proposal storage proposal = proposals[proposalId];
         if (proposal.canceled) {
             return ProposalState.Canceled;
@@ -545,13 +608,18 @@ contract ParentGovernor is ILayerZeroReceiver {
             return ProposalState.Active;
         } else if (proposal.childAggregated < childChains.length) {
             return ProposalState.Aggregating;
-        } else if (proposal.forVotes <= proposal.againstVotes || proposal.forVotes < proposal.quorumVotes) {
+        } else if (
+            proposal.forVotes <= proposal.againstVotes ||
+            proposal.forVotes < proposal.quorumVotes
+        ) {
             return ProposalState.Defeated;
         } else if (proposal.eta == 0) {
             return ProposalState.Succeeded;
         } else if (proposal.executed) {
             return ProposalState.Executed;
-        } else if (block.timestamp >= (proposal.eta + timelock.GRACE_PERIOD())) {
+        } else if (
+            block.timestamp >= (proposal.eta + timelock.GRACE_PERIOD())
+        ) {
             return ProposalState.Expired;
         } else {
             return ProposalState.Queued;
@@ -564,16 +632,16 @@ contract ParentGovernor is ILayerZeroReceiver {
      *
      * @return Amount of votes required for quorum
      */
-    function quorumVotes() public view returns (uint) {
+    function quorumVotes() public view returns (uint256) {
         return 400000e18; // 400,000 = 4% of Any Token
-    } 
+    }
 
     /**
      * @notice The number of votes required in order for a voter to become a proposer
      *
      * @return Amount of votes required for proposing
      */
-    function proposalThreshold() public view returns (uint) {
+    function proposalThreshold() public view returns (uint256) {
         return 100000e18; // 100,000 = 1% of Any Token
     }
 
@@ -584,7 +652,11 @@ contract ParentGovernor is ILayerZeroReceiver {
      * @param proposalId - Proposal receiving a vote
      * @param support - The vote
      */
-    function _castVote(address voter, uint proposalId, bool support) internal {
+    function _castVote(
+        address voter,
+        uint256 proposalId,
+        bool support
+    ) internal {
         require(state(proposalId) == ProposalState.Active, "ERR_VOTING_CLOSED");
         Proposal storage proposal = proposals[proposalId];
         Receipt storage receipt = proposal.receipts[voter];
@@ -604,59 +676,90 @@ contract ParentGovernor is ILayerZeroReceiver {
         emit VoteCast(voter, proposalId, support, votes);
     }
 
-    function _createChildPoll(uint proposalId, uint16 chainId) internal {
+    function _createChildPoll(uint256 proposalId, uint16 chainId) internal {
         address childGovernor = childGovernors[chainId];
         bytes memory payload = abi.encode(proposalId, "_createPoll");
         _crosschainMessage(chainId, childGovernor, payload);
     }
 
-    function _closeChildPoll(uint proposalId, uint16 chainId) internal {
+    function _closeChildPoll(uint256 proposalId, uint16 chainId) internal {
         address childGovernor = childGovernors[chainId];
         bytes memory payload = abi.encode(proposalId, "_closePoll");
         _crosschainMessage(chainId, childGovernor, payload);
     }
 
-    function _crosschainMessage(uint16 chainId, address targetAddress, bytes memory payload) internal {
+    function _crosschainMessage(
+        uint16 chainId,
+        address targetAddress,
+        bytes memory payload
+    ) internal {
         // get the fees we need to pay to LayerZero + Relayer to cover message delivery
         // see Communicator.sol's .estimateFees() function for more details.
-        (uint messageFee,) = endpoint.estimateFees(chainId, address(this), payload, false, bytes(""));
+        (uint256 messageFee, ) = endpoint.estimateFees(
+            chainId,
+            address(this),
+            payload,
+            false,
+            bytes("")
+        );
         require(address(this).balance >= messageFee, "ERR_NOT_ENOUGH_GAS");
 
         // send LayerZero message
-        endpoint.send{value:messageFee}(            // {value: messageFee} will be paid out of this contract!
-            chainId,                                // destination chainId
-            abi.encodePacked(targetAddress),        // destination address of PingPong
-            payload,                                // abi.encode()'ed bytes
-            payable(msg.sender),                    // refund address (LayerZero will refund any extra gas back to caller of send())
-            address(0x0),                           // 'zroPaymentAddress'
-            bytes("")                               // 'txParameters'
+        endpoint.send{value: messageFee}( // {value: messageFee} will be paid out of this contract!
+            chainId, // destination chainId
+            abi.encodePacked(targetAddress), // destination address of PingPong
+            payload, // abi.encode()'ed bytes
+            payable(msg.sender), // refund address (LayerZero will refund any extra gas back to caller of send())
+            address(0x0), // 'zroPaymentAddress'
+            bytes("") // 'txParameters'
         );
     }
 
-    receive() public payable {
-    }
-
+    receive() external payable {}
 }
 
 /* solhint-disable ordering, func-name-mixedcase */
 
 interface TimelockInterface {
-    function delay() external view returns (uint);
-    function GRACE_PERIOD() external view returns (uint);
+    function delay() external view returns (uint256);
+
+    function GRACE_PERIOD() external view returns (uint256);
+
     function acceptAdmin() external;
+
     function queuedTransactions(bytes32 hash) external view returns (bool);
+
     function queueTransaction(
-        uint proposalId, address target, uint value, string calldata signature, bytes calldata data, uint eta
+        uint256 proposalId,
+        address target,
+        uint256 value,
+        string calldata signature,
+        bytes calldata data,
+        uint256 eta
     ) external returns (bytes32);
+
     function cancelTransaction(
-        uint proposalId, address target, uint value, string calldata signature, bytes calldata data, uint eta
+        uint256 proposalId,
+        address target,
+        uint256 value,
+        string calldata signature,
+        bytes calldata data,
+        uint256 eta
     ) external;
+
     function executeTransaction(
-        uint proposalId, address target, uint value, string calldata signature, bytes calldata data, uint eta
+        uint256 proposalId,
+        address target,
+        uint256 value,
+        string calldata signature,
+        bytes calldata data,
+        uint256 eta
     ) external payable returns (bytes memory);
 }
 
-
 interface IGovToken {
-    function getPriorVotes(address account, uint blockNumber) external view returns (uint96);
+    function getPriorVotes(address account, uint256 blockNumber)
+        external
+        view
+        returns (uint96);
 }
