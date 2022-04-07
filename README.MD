@@ -7,7 +7,7 @@ Multi-chain projects face many challenges in governance. If there is no cross-ch
 - They have independet governance on each chain. This may result in communities deciding differently on proposals and have the protocolls on the chains drift apart.
 
 ## Solution
-Enable cross-chain governance to make it possible to vote on the same proposals from different chains. 
+Enable cross-chain governance to make it possible to vote on the same proposals from different chains. Therefore, all governance token holders are included in the governance without requiring them to move their coins and pay gas fees for this.
 
 ## Contracts Overview
 This project was created to illustrate that cross-chain governance is possible using LayerZero. For simplicity, we decided to go with a parent-child pattern, where the proposal happens in one chain but multiple chains can vote in it, this pattern can be upgraded in the future to a more well-connected one.
