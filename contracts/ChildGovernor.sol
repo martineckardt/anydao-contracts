@@ -5,8 +5,9 @@ pragma solidity >=0.8.0 <0.9.0;
 import "interfaces/ILayerZeroEndpoint.sol";
 import "interfaces/ILayerZeroReceiver.sol";
 
+// Contract for the child govenor that allows the parent govenore to create a proposal and request the results
+// at the end of the voting period.
 contract ChildGovernor is ILayerZeroReceiver {
-
     /**
      * @notice Holds information about a child poll
      *
@@ -20,14 +21,14 @@ contract ChildGovernor is ILayerZeroReceiver {
      * @param receipts - Receipts of ballots for the entire set of voters
      */
     struct Poll {
-        uint pollId;
-        uint chainId;
-        uint parentId;
-        uint startBlock;
-        uint forVotes;
-        uint againstVotes;
+        uint256 pollId;
+        uint256 chainId;
+        uint256 parentId;
+        uint256 startBlock;
+        uint256 forVotes;
+        uint256 againstVotes;
         bool closed;
-        mapping (address => Receipt) receipts;
+        mapping(address => Receipt) receipts;
     }
 
     /**
@@ -38,7 +39,7 @@ contract ChildGovernor is ILayerZeroReceiver {
      * @param votes - The number of votes the voter had, which were cast
      */
     struct Receipt {
-        bool hasVoted; 
+        bool hasVoted;
         bool support;
         uint96 votes;
     }
@@ -53,7 +54,7 @@ contract ChildGovernor is ILayerZeroReceiver {
     string public constant name = "AnyDAO Child Governor";
 
     /// @notice The total number of polls
-    uint public pollCount;
+    uint256 public pollCount;
 
     /// @notice The address of the contract owner
     address public owner;
@@ -71,20 +72,16 @@ contract ChildGovernor is ILayerZeroReceiver {
     IGovToken public token;
 
     /// @notice The official record of all polls ever proposed
-    mapping (uint => Poll) public polls;
+    mapping(uint256 => Poll) public polls;
 
     /// @notice An event emitted when a new poll is created
-    event PollCreated(
-        uint pollId,
-        uint chainId,
-        uint parentId
-    );
+    event PollCreated(uint256 pollId, uint256 chainId, uint256 parentId);
 
     /// @notice An event emitted when a vote has been cast on a poll
-    event VoteCast(address voter, uint pollId, bool support, uint votes);
+    event VoteCast(address voter, uint256 pollId, bool support, uint256 votes);
 
     /// @notice An event emitted when a poll has been closed
-    event PollClosed(uint pollId);
+    event PollClosed(uint256 pollId);
 
     /**
      * @notice The admin of this contract
@@ -98,7 +95,13 @@ contract ChildGovernor is ILayerZeroReceiver {
      * @param endpoint_ - Contract responsible for queuing and executing governance decisions
      * @param token_ - Contract with voting power logic
      */
-    constructor(address owner_, address endpoint_, address token_, address parentGovernor_, uint16 parentChain_) {
+    constructor(
+        address owner_,
+        address endpoint_,
+        address token_,
+        address parentGovernor_,
+        uint16 parentChain_
+    ) {
         owner = owner_;
         endpoint = ILayerZeroEndpoint(endpoint_);
         token = IGovToken(token_);
@@ -132,9 +135,9 @@ contract ChildGovernor is ILayerZeroReceiver {
      * @param pollId - Poll receiving a vote
      * @param support - The vote
      */
-    function castVote(uint pollId, bool support) external {
+    function castVote(uint256 pollId, bool support) external {
         require(state(pollId) == PollState.Open, "ERR_VOTING_CLOSED");
-        address voter = msg.sender; 
+        address voter = msg.sender;
         Poll storage poll = polls[pollId];
         Receipt storage receipt = poll.receipts[voter];
         require(receipt.hasVoted == false, "ERR_ALREADY_VOTED");
@@ -161,7 +164,11 @@ contract ChildGovernor is ILayerZeroReceiver {
      *
      * @return A Receipt struct with the information about the vote cast
      */
-    function getReceipt(uint pollId, address voter) public view returns (Receipt memory) {
+    function getReceipt(uint256 pollId, address voter)
+        public
+        view
+        returns (Receipt memory)
+    {
         return polls[pollId].receipts[voter];
     }
 
@@ -172,7 +179,7 @@ contract ChildGovernor is ILayerZeroReceiver {
      *
      * @return PollState enum (uint) with state of the poll
      */
-    function state(uint pollId) public view returns (PollState) {
+    function state(uint256 pollId) public view returns (PollState) {
         require(pollCount >= pollId && pollId > 0, "ERR_INVALID_PROPOSAL_ID");
         Poll storage poll = polls[pollId];
         if (poll.closed) {
@@ -182,24 +189,39 @@ contract ChildGovernor is ILayerZeroReceiver {
         }
     }
 
-    function lzReceive(uint16 _srcChainId, bytes memory _srcAddress, uint64, bytes memory _payload) override external {
+    function lzReceive(
+        uint16 _srcChainId,
+        bytes memory _srcAddress,
+        uint64,
+        bytes memory _payload
+    ) external override {
         require(msg.sender == address(endpoint));
 
         // use assembly to extract the address from the bytes memory parameter
         address fromAddress;
-        assembly { fromAddress := mload(add(_srcAddress, 20)) }
+        assembly {
+            fromAddress := mload(add(_srcAddress, 20))
+        }
         require(fromAddress == parentGovernor);
 
-        (uint parentId, string memory function_name) = abi.decode(_payload, (uint, string));
+        (uint256 parentId, string memory function_name) = abi.decode(
+            _payload,
+            (uint256, string)
+        );
 
-        if (keccak256(_payload) == keccak256(abi.encodePacked(parentId, "_createPoll"))) {
+        if (
+            keccak256(_payload) ==
+            keccak256(abi.encodePacked(parentId, "_createPoll"))
+        ) {
             _createPoll(_srcChainId, parentId);
         }
 
-        if (keccak256(_payload) == keccak256(abi.encodePacked(parentId, "_closePoll"))) {
+        if (
+            keccak256(_payload) ==
+            keccak256(abi.encodePacked(parentId, "_closePoll"))
+        ) {
             _closePoll(parentId);
         }
-
     }
 
     /**
@@ -210,7 +232,10 @@ contract ChildGovernor is ILayerZeroReceiver {
      *
      * @return Poll ID
      */
-    function _createPoll(uint chainId, uint parentId) internal returns (uint) {
+    function _createPoll(uint256 chainId, uint256 parentId)
+        internal
+        returns (uint256)
+    {
         pollCount++;
         Poll storage newPoll = polls[pollCount];
         newPoll.pollId = pollCount;
@@ -221,42 +246,48 @@ contract ChildGovernor is ILayerZeroReceiver {
         newPoll.againstVotes = 0;
         newPoll.closed = false;
 
-        emit PollCreated(
-            newPoll.pollId,
-            newPoll.chainId,
-            newPoll.parentId
-        );
+        emit PollCreated(newPoll.pollId, newPoll.chainId, newPoll.parentId);
         return newPoll.pollId;
     }
 
     /**
      * @notice Sends the poll results to the parent chain
      */
-    function _closePoll(uint pollId) internal {
-
+    function _closePoll(uint256 pollId) internal {
         Poll storage poll = polls[pollId];
 
-        bytes memory payload = abi.encode(poll.parentId, poll.forVotes, poll.againstVotes);
+        bytes memory payload = abi.encode(
+            poll.parentId,
+            poll.forVotes,
+            poll.againstVotes
+        );
 
-        (uint messageFee,) = endpoint.estimateFees(parentChain, address(this), payload, false, bytes(""));
+        (uint256 messageFee, ) = endpoint.estimateFees(
+            parentChain,
+            address(this),
+            payload,
+            false,
+            bytes("")
+        );
         require(address(this).balance >= messageFee, "ERR_NOT_ENOUGH_GAS");
 
         // send LayerZero message
-        endpoint.send{value:messageFee}(            // {value: messageFee} will be paid out of this contract!
-            parentChain,                            // destination chain ID
-            abi.encodePacked(parentGovernor),        // destination address of the message
-            payload,                                // abi.encode()'ed bytes
-            payable(msg.sender),                             // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send()
-            address(0x0),                           // 'zroPaymentAddress'
-            bytes("")                               // 'txParameters'
+        endpoint.send{value: messageFee}( // {value: messageFee} will be paid out of this contract!
+            parentChain, // destination chain ID
+            abi.encodePacked(parentGovernor), // destination address of the message
+            payload, // abi.encode()'ed bytes
+            payable(msg.sender), // (msg.sender will be this contract) refund address (LayerZero will refund any extra gas back to caller of send()
+            address(0x0), // 'zroPaymentAddress'
+            bytes("") // 'txParameters'
         );
 
         poll.closed = true;
     }
-
-
 }
 
 interface IGovToken {
-    function getPriorVotes(address account, uint blockNumber) external view returns (uint96);
+    function getPriorVotes(address account, uint256 blockNumber)
+        external
+        view
+        returns (uint96);
 }
